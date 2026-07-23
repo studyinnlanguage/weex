@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeBot SaaS - Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0b0e11; color: #eaecef; min-height: 100vh; }
+        .header {
+            background: #1e2126; border-bottom: 1px solid #2a2e36; padding: 12px 20px;
+            display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100;
+        }
+        .brand { display: flex; align-items: center; gap: 12px; }
+        .logo { width: 36px; height: 36px; background: #f0b90b; color: #0b0e11;
+                border-radius: 8px; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; }
+        .brand-text h1 { font-size: 16px; font-weight: 700; }
+        .brand-text p { font-size: 11px; color: #848e9c; }
+        .header-right { display: flex; align-items: center; gap: 14px; }
+        .badge { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+        .badge-active { background: rgba(14,203,129,0.15); color: #0ecb81; }
+        .badge-inactive { background: rgba(246,70,93,0.15); color: #f6465d; }
+        .badge-admin { background: rgba(246,70,93,0.15); color: #f6465d; }
+        .user-info { text-align: right; font-size: 12px; }
+        .btn-logout { background: none; border: 1px solid #2a2e36; color: #848e9c;
+                      padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+        .btn-logout:hover { color: #f6465d; border-color: #f6465d; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+
+        /* License activation box */
+        .license-box {
+            background: #1e2126; border: 1px solid #2a2e36; border-radius: 12px;
+            padding: 32px; max-width: 500px; margin: 60px auto; text-align: center;
+        }
+        .license-box h2 { margin-bottom: 12px; font-size: 20px; }
+        .license-box p { color: #848e9c; font-size: 13px; margin-bottom: 20px; }
+        .license-input {
+            width: 100%; padding: 14px; background: #0b0e11; border: 1px solid #2a2e36;
+            color: #eaecef; border-radius: 10px; font-size: 14px; text-align: center;
+            font-family: monospace; letter-spacing: 1px; margin-bottom: 12px;
+        }
+        .license-input:focus { outline: none; border-color: #f0b90b; }
+        .btn-primary {
+            background: linear-gradient(135deg, #f0b90b 0%, #f8d12f 100%);
+            color: #0b0e11; border: none; padding: 14px 24px; border-radius: 10px;
+            font-weight: 700; cursor: pointer; font-size: 14px; width: 100%;
+        }
+        .btn-primary:hover { transform: translateY(-1px); }
+        .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+        .alert-error { background: rgba(246,70,93,0.1); border: 1px solid rgba(246,70,93,0.3); color: #f6465d; }
+        .alert-success { background: rgba(14,203,129,0.1); border: 1px solid rgba(14,203,129,0.3); color: #0ecb81; }
+
+        /* Bot-engine iframe container */
+        .bot-frame-container {
+            background: #1e2126; border: 1px solid #2a2e36; border-radius: 12px; overflow: hidden;
+        }
+        .frame-header {
+            padding: 12px 20px; border-bottom: 1px solid #2a2e36; display: flex;
+            justify-content: space-between; align-items: center;
+        }
+        .frame-title { font-size: 14px; font-weight: 600; }
+        .bot-controls { display: flex; gap: 8px; }
+        .btn-sm { padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; }
+        .btn-start { background: #0ecb81; color: #0b0e11; }
+        .btn-stop { background: #f6465d; color: white; }
+        .btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
+        #botFrame { width: 100%; height: calc(100vh - 200px); min-height: 800px; border: none; display: block; }
+        .frame-placeholder {
+            padding: 100px 20px; text-align: center; color: #848e9c;
+        }
+        .admin-link {
+            display: inline-block; margin-top: 16px; padding: 8px 16px;
+            background: rgba(246,70,93,0.1); border: 1px solid rgba(246,70,93,0.3);
+            color: #f6465d; border-radius: 8px; text-decoration: none; font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="brand">
+            <div class="logo">T</div>
+            <div class="brand-text">
+                <h1>TradeBot SaaS</h1>
+                <p>EMA 8,13,21,55 Strategy</p>
+            </div>
+        </div>
+        <div class="header-right">
+            <div id="subBadge" class="badge badge-inactive">Loading...</div>
+            <div class="user-info">
+                <div id="userEmail">—</div>
+                <div id="userRole" style="color: #848e9c;">user</div>
+            </div>
+            <button class="btn-logout" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- License activation (shown if no active subscription) -->
+        <div id="licenseSection" style="display:none;">
+            <div class="license-box">
+                <h2>🔑 License Activate Karein</h2>
+                <p>Apna license key enter karein (admin se mila hoga)</p>
+                <div id="licAlert"></div>
+                <input type="text" id="licenseKey" class="license-input" placeholder="TRDBOT-XXXX-XXXX-XXXX-XXXX" style="text-transform: uppercase;">
+                <button class="btn-primary" onclick="activateLicense()">Activate License</button>
+                <p style="margin-top: 16px; font-size: 11px;">
+                    License nahi hai? Admin se contact karein.
+                </p>
+            </div>
+        </div>
+
+        <!-- Bot Dashboard (shown if subscription active) -->
+        <div id="dashboardSection" style="display:none;">
+            <div class="bot-frame-container">
+                <div class="frame-header">
+                    <div class="frame-title">📊 Trading Dashboard</div>
+                    <div class="bot-controls">
+                        <button id="startBtn" class="btn-sm btn-start" onclick="startBot()">▶ Start Bot</button>
+                        <button id="stopBtn" class="btn-sm btn-stop" onclick="stopBot()" style="display:none;">■ Stop Bot</button>
+                    </div>
+                </div>
+                <div id="framePlaceholder" class="frame-placeholder">
+                    <h3 style="margin-bottom: 12px;">Bot chalu karne ke liye "Start Bot" dabaye</h3>
+                    <p>Bot start hone par yahan trading dashboard dikhega</p>
+                </div>
+                <iframe id="botFrame" style="display:none;"></iframe>
+            </div>
+            <div id="adminSection"></div>
+        </div>
+    </div>
+
+    <script>
+        let userData = null;
+        let botRunning = false;
+
+        async function loadMe() {
+            try {
+                const r = await fetch('/api/auth/me');
+                const data = await r.json();
+                if (!data.success) {
+                    // Not logged in or session expired — clear and go to login
+                    window.location.href = '/?logout=1';
+                    return;
+                }
+                userData = data.user;
+                botRunning = data.bot_running;
+                renderHeader(data);
+                renderLicenseOrDashboard(data);
+            } catch(e) {
+                console.error('loadMe error:', e);
+                // Network error — show message instead of redirect loop
+                document.getElementById('subBadge').textContent = 'Connection Error';
+                document.body.innerHTML = '<div style="text-align:center;padding:80px 20px;color:#eaecef;font-family:sans-serif;"><h2>Connection Error</h2><p>Server se connect nahi ho pa raha. Please refresh karein.</p><button onclick="location.reload()" style="margin-top:20px;padding:10px 20px;background:#f0b90b;color:#0b0e11;border:none;border-radius:8px;cursor:pointer;font-weight:700;">Refresh</button></div>';
+            }
+        }
+
+        function renderHeader(data) {
+            document.getElementById('userEmail').textContent = userData.email;
+            document.getElementById('userRole').textContent = userData.role;
+            const badge = document.getElementById('subBadge');
+            if (data.subscription.active) {
+                badge.className = 'badge badge-active';
+                badge.textContent = `${data.subscription.plan} • ${data.subscription.days_left}d left`;
+            } else {
+                badge.className = 'badge badge-inactive';
+                badge.textContent = 'No License';
+            }
+            if (userData.role === 'admin') {
+                document.getElementById('adminSection').innerHTML = '<a href="/admin" class="admin-link">→ Admin Panel</a>';
+            }
+        }
+
+        function renderLicenseOrDashboard(data) {
+            if (!data.subscription.active) {
+                document.getElementById('licenseSection').style.display = 'block';
+                document.getElementById('dashboardSection').style.display = 'none';
+            } else {
+                document.getElementById('licenseSection').style.display = 'none';
+                document.getElementById('dashboardSection').style.display = 'block';
+                renderBotControls();
+                if (botRunning) loadBotFrame();
+            }
+        }
+
+        function renderBotControls() {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            if (botRunning) {
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'block';
+            } else {
+                startBtn.style.display = 'block';
+                stopBtn.style.display = 'none';
+            }
+        }
+
+        async function activateLicense() {
+            const key = document.getElementById('licenseKey').value.trim().toUpperCase();
+            if (!key) { showLicAlert('License key daalein', 'error'); return; }
+            try {
+                const r = await fetch('/api/license/activate', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: key})
+                });
+                const data = await r.json();
+                if (data.success) {
+                    showLicAlert(`✅ ${data.message}`, 'success');
+                    setTimeout(() => window.location.reload(), 1500);
+                } else {
+                    showLicAlert(data.error || 'Activation failed', 'error');
+                }
+            } catch(e) { showLicAlert('Network error', 'error'); }
+        }
+
+        function showLicAlert(msg, type) {
+            const el = document.getElementById('licAlert');
+            el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+        }
+
+        async function startBot() {
+            const btn = document.getElementById('startBtn');
+            btn.disabled = true; btn.textContent = 'Starting...';
+            try {
+                const r = await fetch('/api/bot/start', {method: 'POST'});
+                const data = await r.json();
+                if (data.success) {
+                    botRunning = true;
+                    renderBotControls();
+                    loadBotFrame();
+                } else {
+                    alert('❌ ' + (data.error || 'Failed to start'));
+                    btn.disabled = false; btn.textContent = '▶ Start Bot';
+                }
+            } catch(e) {
+                alert('Network error');
+                btn.disabled = false; btn.textContent = '▶ Start Bot';
+            }
+        }
+
+        async function stopBot() {
+            if (!confirm('Stop the bot?')) return;
+            const btn = document.getElementById('stopBtn');
+            btn.disabled = true; btn.textContent = 'Stopping...';
+            try {
+                const r = await fetch('/api/bot/stop', {method: 'POST'});
+                const data = await r.json();
+                if (data.success) {
+                    botRunning = false;
+                    renderBotControls();
+                    document.getElementById('botFrame').style.display = 'none';
+                    document.getElementById('framePlaceholder').style.display = 'block';
+                }
+            } catch(e) { alert('Network error'); }
+            btn.disabled = false; btn.textContent = '■ Stop Bot';
+        }
+
+        async function loadBotFrame() {
+            try {
+                const r = await fetch('/api/bot/embed');
+                const data = await r.json();
+                if (data.success) {
+                    // Load bot-engine dashboard directly in iframe via /bot/ proxy
+                    const frame = document.getElementById('botFrame');
+                    const placeholder = document.getElementById('framePlaceholder');
+                    placeholder.style.display = 'none';
+                    frame.style.display = 'block';
+                    frame.src = '/bot/';
+                }
+            } catch(e) { console.error(e); }
+        }
+
+        async function logout() {
+            await fetch('/api/auth/logout', {method: 'POST'});
+            window.location.href = '/';
+        }
+
+        loadMe();
+    </script>
+</body>
+</html>

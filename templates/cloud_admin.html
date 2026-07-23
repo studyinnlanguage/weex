@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeBot Cloud - Admin Panel</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0b0e11; color: #eaecef; min-height: 100vh; padding: 20px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+        .header h1 { font-size: 24px; }
+        .header a { color: #f0b90b; text-decoration: none; font-size: 13px; }
+        .login-card {
+            background: #1e2126; border: 1px solid #2a2e36; border-radius: 12px;
+            padding: 32px; max-width: 400px; margin: 80px auto;
+        }
+        .login-card h2 { text-align: center; margin-bottom: 8px; }
+        .login-card p { text-align: center; color: #848e9c; font-size: 13px; margin-bottom: 20px; }
+        .input {
+            width: 100%; padding: 12px; background: #0b0e11;
+            border: 1px solid #2a2e36; color: #eaecef; border-radius: 8px;
+            font-size: 14px; margin-bottom: 12px;
+        }
+        .btn {
+            width: 100%; padding: 12px; background: #f0b90b; color: #0b0e11;
+            border: none; border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 14px;
+        }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .stat-card { background: #1e2126; border: 1px solid #2a2e36; border-radius: 12px; padding: 20px; }
+        .stat-label { font-size: 11px; color: #848e9c; text-transform: uppercase; margin-bottom: 6px; }
+        .stat-value { font-size: 28px; font-weight: 700; }
+        .stat-value.green { color: #0ecb81; }
+        .stat-value.yellow { color: #f0b90b; }
+        .stat-value.red { color: #f6465d; }
+        .users-table { background: #1e2126; border: 1px solid #2a2e36; border-radius: 12px; overflow: hidden; }
+        .table-header { padding: 16px 20px; border-bottom: 1px solid #2a2e36; font-weight: 600; }
+        .user-row { padding: 14px 20px; border-bottom: 1px solid #2a2e36; display: grid;
+                    grid-template-columns: 2fr 1fr 1fr 1fr auto; gap: 12px; align-items: center; }
+        .user-row:last-child { border-bottom: none; }
+        .user-email { font-weight: 600; font-size: 13px; }
+        .user-name { font-size: 11px; color: #848e9c; }
+        .badge { padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-align: center; }
+        .badge-active { background: rgba(14,203,129,0.15); color: #0ecb81; }
+        .badge-expired { background: rgba(246,70,93,0.15); color: #f6465d; }
+        .badge-trial { background: rgba(240,185,11,0.15); color: #f0b90b; }
+        .badge-admin { background: rgba(246,70,93,0.15); color: #f6465d; }
+        .badge-banned { background: rgba(246,70,93,0.15); color: #f6465d; }
+        .badge-running { background: rgba(14,203,129,0.15); color: #0ecb81; }
+        .badge-stopped { background: rgba(94,102,115,0.15); color: #848e9c; }
+        .btn-sm { padding: 6px 10px; font-size: 11px; border: none; border-radius: 6px; cursor: pointer; margin-left: 4px; }
+        .btn-extend { background: #f0b90b; color: #0b0e11; }
+        .btn-ban { background: #f6465d; color: white; }
+        .btn-unban { background: #0ecb81; color: #0b0e11; }
+        .btn-delete { background: #2a2e36; color: #f6465d; border: 1px solid #f6465d; }
+        .error { color: #f6465d; text-align: center; margin-bottom: 12px; font-size: 13px; display: none; }
+        .error.show { display: block; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Admin Panel</h1>
+            <a href="/">← Back to Dashboard</a>
+        </div>
+
+        {% if admin_login_required %}
+        <div class="login-card">
+            <h2>Admin Login</h2>
+            <p>Admin password daalein</p>
+            <div id="err" class="error"></div>
+            <input type="password" id="adminPass" class="input" placeholder="Admin password">
+            <button class="btn" onclick="adminLogin()">Login as Admin</button>
+        </div>
+
+        <script>
+            async function adminLogin() {
+                const pass = document.getElementById('adminPass').value;
+                try {
+                    const r = await fetch('/api/admin/login', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({password: pass})
+                    });
+                    const data = await r.json();
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        const err = document.getElementById('err');
+                        err.textContent = data.error || 'Login failed';
+                        err.classList.add('show');
+                    }
+                } catch(e) {
+                    alert('Network error');
+                }
+            }
+        </script>
+        {% else %}
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-label">Total Users</div>
+                <div id="totalUsers" class="stat-value">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Active Subscriptions</div>
+                <div id="activeSubs" class="stat-value green">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Bots Running</div>
+                <div id="botsRunning" class="stat-value yellow">—</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Expired/Banned</div>
+                <div id="expiredCount" class="stat-value red">—</div>
+            </div>
+        </div>
+
+        <div class="users-table">
+            <div class="table-header">User Management</div>
+            <div id="usersList" style="padding: 8px 0;">
+                <div style="text-align: center; padding: 40px; color: #848e9c;">Loading users...</div>
+            </div>
+        </div>
+
+        <script>
+            async function loadUsers() {
+                try {
+                    const r = await fetch('/api/admin/users');
+                    const data = await r.json();
+                    if (data.success) {
+                        renderStats(data.users);
+                        renderUsers(data.users);
+                    }
+                } catch(e) {
+                    console.error(e);
+                }
+            }
+
+            function renderStats(users) {
+                document.getElementById('totalUsers').textContent = users.length;
+                document.getElementById('activeSubs').textContent = users.filter(u => u.subscription.active).length;
+                document.getElementById('botsRunning').textContent = users.filter(u => u.bot_running).length;
+                document.getElementById('expiredCount').textContent = users.filter(u => !u.subscription.active || u.banned).length;
+            }
+
+            function renderUsers(users) {
+                const list = document.getElementById('usersList');
+                if (users.length === 0) {
+                    list.innerHTML = '<div style="text-align:center;padding:40px;color:#848e9c;">No users yet</div>';
+                    return;
+                }
+                list.innerHTML = users.map(u => {
+                    const subBadge = u.subscription.status === 'active' ?
+                        `<span class="badge badge-${u.subscription.plan === 'trial' ? 'trial' : 'active'}">${u.subscription.plan} • ${u.subscription.days_left}d</span>` :
+                        `<span class="badge badge-expired">expired</span>`;
+                    const botBadge = u.bot_running ?
+                        `<span class="badge badge-running">running</span>` :
+                        `<span class="badge badge-stopped">stopped</span>`;
+                    const roleBadge = u.role === 'admin' ? '<span class="badge badge-admin">admin</span>' : '';
+                    const banBadge = u.banned ? '<span class="badge badge-banned">banned</span>' : '';
+                    const actions = u.role !== 'admin' ? `
+                        <button class="btn-sm btn-extend" onclick="extendSub('${u.id}')">Extend</button>
+                        <button class="btn-sm ${u.banned ? 'btn-unban' : 'btn-ban'}" onclick="banUser('${u.id}', ${!u.banned})">${u.banned ? 'Unban' : 'Ban'}</button>
+                        <button class="btn-sm btn-delete" onclick="deleteUser('${u.id}')">Delete</button>
+                    ` : '';
+                    return `
+                        <div class="user-row">
+                            <div>
+                                <div class="user-email">${u.email}</div>
+                                <div class="user-name">${u.name} • ${u.exchange}</div>
+                            </div>
+                            <div>${subBadge}</div>
+                            <div>${botBadge}</div>
+                            <div>${roleBadge} ${banBadge}</div>
+                            <div>${actions}</div>
+                        </div>`;
+                }).join('');
+            }
+
+            async function extendSub(userId) {
+                const days = prompt('Kitne days extend karne hain?', '30');
+                if (!days) return;
+                const plan = prompt('Plan kya rakha jaye? (trial/basic/pro/lifetime)', 'basic');
+                try {
+                    const r = await fetch('/api/admin/extend', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({user_id: userId, days: parseInt(days), plan: plan || 'basic'})
+                    });
+                    const data = await r.json();
+                    if (data.success) {
+                        alert('✅ Extended by ' + days + ' days');
+                        loadUsers();
+                    } else {
+                        alert('❌ ' + (data.error || 'Failed'));
+                    }
+                } catch(e) { alert('Network error'); }
+            }
+
+            async function banUser(userId, banned) {
+                if (banned && !confirm('Yeh user ban kar dein?')) return;
+                try {
+                    const r = await fetch('/api/admin/ban', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({user_id: userId, banned: banned})
+                    });
+                    const data = await r.json();
+                    if (data.success) {
+                        alert(banned ? '✅ User banned' : '✅ User unbanned');
+                        loadUsers();
+                    }
+                } catch(e) { alert('Network error'); }
+            }
+
+            async function deleteUser(userId) {
+                if (!confirm('Yeh user PERMANENTLY delete kar dein? Yeh undo nahi hoga!')) return;
+                try {
+                    const r = await fetch('/api/admin/delete', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({user_id: userId})
+                    });
+                    const data = await r.json();
+                    if (data.success) {
+                        alert('✅ User deleted');
+                        loadUsers();
+                    }
+                } catch(e) { alert('Network error'); }
+            }
+
+            loadUsers();
+        </script>
+        {% endif %}
+    </div>
+</body>
+</html>

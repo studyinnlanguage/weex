@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeBot Cloud - Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0b0e11; color: #eaecef; min-height: 100vh;
+        }
+        .header {
+            background: #1e2126; border-bottom: 1px solid #2a2e36;
+            padding: 14px 20px; display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 100;
+        }
+        .brand { display: flex; align-items: center; gap: 12px; }
+        .logo { width: 36px; height: 36px; background: #f0b90b; color: #0b0e11;
+                border-radius: 8px; display: flex; align-items: center; justify-content: center;
+                font-weight: 800; font-size: 18px; }
+        .brand-text h1 { font-size: 16px; font-weight: 700; }
+        .brand-text p { font-size: 11px; color: #848e9c; }
+        .header-right { display: flex; align-items: center; gap: 14px; }
+        .badge { padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+        .badge-trial { background: rgba(240,185,11,0.15); color: #f0b90b; }
+        .badge-active { background: rgba(14,203,129,0.15); color: #0ecb81; }
+        .badge-expired { background: rgba(246,70,93,0.15); color: #f6465d; }
+        .badge-admin { background: rgba(246,70,93,0.15); color: #f6465d; }
+        .user-info { text-align: right; font-size: 12px; }
+        .user-email { color: #eaecef; }
+        .user-role { color: #848e9c; text-transform: capitalize; }
+        .btn-logout { background: none; border: 1px solid #2a2e36; color: #848e9c;
+                      padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 12px; }
+        .btn-logout:hover { color: #f6465d; border-color: #f6465d; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .sub-banner {
+            background: linear-gradient(135deg, rgba(14,203,129,0.1), rgba(14,203,129,0.05));
+            border: 1px solid rgba(14,203,129,0.3);
+            border-radius: 12px; padding: 16px 20px; margin-bottom: 20px;
+            display: flex; align-items: center; justify-content: space-between;
+        }
+        .sub-banner.expired {
+            background: linear-gradient(135deg, rgba(246,70,93,0.1), rgba(246,70,93,0.05));
+            border-color: rgba(246,70,93,0.3);
+        }
+        .sub-info { display: flex; align-items: center; gap: 12px; }
+        .sub-icon { font-size: 24px; }
+        .sub-text h3 { font-size: 15px; margin-bottom: 2px; text-transform: capitalize; }
+        .sub-text p { font-size: 12px; color: #848e9c; }
+        .tabs { display: flex; gap: 4px; background: #1e2126; padding: 4px;
+                border-radius: 10px; margin-bottom: 20px; }
+        .tab { flex: 1; padding: 10px; text-align: center; cursor: pointer;
+               border-radius: 8px; font-size: 13px; font-weight: 600; color: #848e9c;
+               border: none; background: none; transition: all 0.2s; }
+        .tab.active { background: #f0b90b; color: #0b0e11; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-bottom: 20px; }
+        .stat-card { background: #1e2126; border: 1px solid #2a2e36; border-radius: 12px; padding: 20px; }
+        .stat-label { font-size: 11px; color: #848e9c; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .stat-value { font-size: 24px; font-weight: 700; }
+        .stat-value.green { color: #0ecb81; }
+        .stat-value.red { color: #f6465d; }
+        .stat-value.yellow { color: #f0b90b; }
+        .stat-sub { font-size: 11px; color: #848e9c; margin-top: 4px; }
+        .card { background: #1e2126; border: 1px solid #2a2e36; border-radius: 12px;
+                margin-bottom: 20px; overflow: hidden; }
+        .card-header { padding: 16px 20px; border-bottom: 1px solid #2a2e36; font-size: 15px; font-weight: 600; }
+        .card-body { padding: 20px; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .form-group { margin-bottom: 14px; }
+        .form-group.full { grid-column: 1 / -1; }
+        .label { display: block; font-size: 12px; color: #848e9c; margin-bottom: 6px; }
+        .input, .select {
+            width: 100%; padding: 10px 12px; background: #0b0e11;
+            border: 1px solid #2a2e36; color: #eaecef; border-radius: 8px; font-size: 13px;
+        }
+        .input:focus, .select:focus { outline: none; border-color: #f0b90b; }
+        .btn-toggle-group { display: flex; gap: 6px; }
+        .btn-toggle {
+            flex: 1; padding: 10px; background: #0b0e11;
+            border: 1px solid #2a2e36; color: #848e9c; border-radius: 8px;
+            cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s;
+        }
+        .btn-toggle.active { background: #f0b90b; color: #0b0e11; border-color: #f0b90b; }
+        .btn-toggle.active.green { background: #0ecb81; border-color: #0ecb81; }
+        .btn-toggle.active.red { background: #f6465d; border-color: #f6465d; }
+        .btn-primary {
+            background: linear-gradient(135deg, #f0b90b 0%, #f8d12f 100%);
+            color: #0b0e11; border: none; padding: 12px 24px; border-radius: 8px;
+            font-weight: 700; cursor: pointer; font-size: 13px; transition: transform 0.2s;
+        }
+        .btn-primary:hover { transform: translateY(-1px); }
+        .btn-primary:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+        .btn-success { background: #0ecb81; color: #0b0e11; }
+        .btn-danger { background: #f6465d; color: white; }
+        .btn-large { padding: 16px 32px; font-size: 15px; width: 100%; }
+        .bot-controls { display: flex; gap: 12px; margin-top: 16px; }
+        .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+        .alert-warning { background: rgba(240,185,11,0.1); border: 1px solid rgba(240,185,11,0.3); color: #f0b90b; }
+        .alert-success { background: rgba(14,203,129,0.1); border: 1px solid rgba(14,203,129,0.3); color: #0ecb81; }
+        .alert-error { background: rgba(246,70,93,0.1); border: 1px solid rgba(246,70,93,0.3); color: #f6465d; }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .status-dot.running { background: #0ecb81; animation: pulse 1.5s infinite; }
+        .status-dot.stopped { background: #5e6673; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .admin-link {
+            display: inline-block; margin-top: 20px; padding: 8px 16px;
+            background: rgba(246,70,93,0.1); border: 1px solid rgba(246,70,93,0.3);
+            color: #f6465d; border-radius: 8px; text-decoration: none; font-size: 12px;
+        }
+        @media (max-width: 768px) {
+            .form-grid { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="brand">
+            <div class="logo">T</div>
+            <div class="brand-text">
+                <h1>TradeBot Cloud</h1>
+                <p>EMA 8,13,21,55 Strategy</p>
+            </div>
+        </div>
+        <div class="header-right">
+            <div id="subBadge" class="badge badge-trial">Loading...</div>
+            <div class="user-info">
+                <div id="userEmail" class="user-email">—</div>
+                <div id="userRole" class="user-role">user</div>
+            </div>
+            <button class="btn-logout" onclick="logout()">Logout</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <div id="subBanner"></div>
+
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('overview')">Overview</button>
+            <button class="tab" onclick="switchTab('settings')">Settings</button>
+        </div>
+
+        <!-- Overview Tab -->
+        <div id="tab-overview" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-label">Wallet Balance</div>
+                    <div id="statBalance" class="stat-value green">—</div>
+                    <div class="stat-sub" id="statBalanceSub">Not connected</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Bot Status</div>
+                    <div id="statBotStatus" class="stat-value yellow">
+                        <span class="status-dot stopped"></span>Stopped
+                    </div>
+                    <div class="stat-sub" id="statBotStarted">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Exchange</div>
+                    <div id="statExchange" class="stat-value">—</div>
+                    <div class="stat-sub" id="statEnv">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Active Coins</div>
+                    <div id="statCoins" class="stat-value">0</div>
+                    <div class="stat-sub" id="statCoinsList">—</div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Bot Controls</div>
+                <div class="card-body">
+                    <div id="botAlert"></div>
+                    <div class="bot-controls">
+                        <button id="startBtn" class="btn-primary btn-success btn-large" onclick="startBot()">
+                            ▶ Start Bot
+                        </button>
+                        <button id="stopBtn" class="btn-primary btn-danger btn-large" onclick="stopBot()" style="display:none;">
+                            ■ Stop Bot
+                        </button>
+                    </div>
+                    <div id="botInfo" style="margin-top: 16px; font-size: 12px; color: #848e9c;"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Live Bot Status</div>
+                <div class="card-body">
+                    <pre id="liveStatus" style="font-size: 11px; background: #0b0e11; padding: 12px; border-radius: 8px; overflow-x: auto; min-height: 100px;">Bot not running. Start the bot to see live status.</pre>
+                </div>
+            </div>
+
+            <div id="adminSection"></div>
+        </div>
+
+        <!-- Settings Tab -->
+        <div id="tab-settings" class="tab-content">
+            <div class="card">
+                <div class="card-header">Exchange & API Credentials</div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label class="label">Exchange</label>
+                            <div class="btn-toggle-group">
+                                <button type="button" id="exBinance" class="btn-toggle active" onclick="setExchange('binance')">Binance</button>
+                                <button type="button" id="exWeex" class="btn-toggle green" onclick="setExchange('weex')">WEEX</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label class="label">Environment</label>
+                            <div class="btn-toggle-group">
+                                <button type="button" id="envDemo" class="btn-toggle active" onclick="setEnv(true)">Demo</button>
+                                <button type="button" id="envLive" class="btn-toggle red" onclick="setEnv(false)">Live</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group full">
+                        <label class="label">API Key <span id="apiKeyStatus"></span></label>
+                        <input type="password" id="apiKey" class="input" placeholder="Enter API key">
+                    </div>
+                    <div class="form-group full">
+                        <label class="label">API Secret</label>
+                        <input type="password" id="apiSecret" class="input" placeholder="Enter API secret">
+                    </div>
+                    <div class="form-group full" id="passphraseGroup" style="display:none;">
+                        <label class="label">WEEX Passphrase <span id="passphraseStatus"></span></label>
+                        <input type="password" id="apiPassphrase" class="input" placeholder="Enter WEEX passphrase">
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">Trading Settings</div>
+                <div class="card-body">
+                    <div class="form-grid">
+                        <div class="form-group full">
+                            <label class="label">Coins (comma-separated)</label>
+                            <input type="text" id="symbolsList" class="input" placeholder="BTCUSDT, ETHUSDT, SOLUSDT">
+                        </div>
+                        <div class="form-group">
+                            <label class="label">Timeframe</label>
+                            <select id="timeframe" class="select">
+                                <option value="1m">1 minute</option>
+                                <option value="5m" selected>5 minutes</option>
+                                <option value="15m">15 minutes</option>
+                                <option value="1h">1 hour</option>
+                                <option value="4h">4 hours</option>
+                                <option value="1d">1 day</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="label">Trade Mode</label>
+                            <select id="mode" class="select">
+                                <option value="both" selected>Both (Long & Short)</option>
+                                <option value="long">Long Only</option>
+                                <option value="short">Short Only</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="label">Leverage (1-<span id="maxLev">125</span>x)</label>
+                            <input type="number" id="leverage" class="input" value="10" min="1" max="125">
+                        </div>
+                        <div class="form-group">
+                            <label class="label">Amount Mode</label>
+                            <div class="btn-toggle-group">
+                                <button type="button" id="amtFixed" class="btn-toggle active" onclick="setAmountMode('fixed')">Fixed USDT</button>
+                                <button type="button" id="amtPct" class="btn-toggle" onclick="setAmountMode('percent')">% of Wallet</button>
+                            </div>
+                        </div>
+                        <div class="form-group" id="amountGroup">
+                            <label class="label">Amount (USDT)</label>
+                            <input type="number" id="amount" class="input" value="100" min="1">
+                        </div>
+                        <div class="form-group" id="amountPctGroup" style="display:none;">
+                            <label class="label">Wallet % per trade</label>
+                            <input type="number" id="amountPct" class="input" value="10" min="1" max="100">
+                        </div>
+                        <div class="form-group">
+                            <label class="label">Stop Loss % (min 0.5%)</label>
+                            <input type="number" id="stopLossPct" class="input" value="2" min="0.5" max="50" step="0.5">
+                        </div>
+                        <div class="form-group">
+                            <label class="label">Take Profit % (auto 1:3 RR)</label>
+                            <input type="text" id="takeProfitPct" class="input" value="6.0" readonly style="color: #0ecb81;">
+                        </div>
+                    </div>
+                    <p style="font-size: 11px; color: #848e9c; margin-top: 8px;">
+                        ⚡ TP is always SL × 3 (hardcoded 1:3 risk-reward — strategy cannot be changed)
+                    </p>
+                </div>
+            </div>
+
+            <button class="btn-primary btn-large" onclick="saveConfig()">Save Settings</button>
+        </div>
+    </div>
+
+    <script>
+        let userData = null;
+        let botConfig = null;
+        let selectedExchange = 'binance';
+        let selectedEnv = true;
+        let selectedAmountMode = 'fixed';
+
+        async function loadMe() {
+            try {
+                const r = await fetch('/api/auth/me');
+                const data = await r.json();
+                if (!data.success) {
+                    window.location.href = '/';
+                    return;
+                }
+                userData = data.user;
+                botConfig = data.bot_config;
+                renderUser();
+                renderSubscription(data.subscription);
+                renderSettings();
+                renderBotStatus(data.bot_running);
+                if (data.bot_running) loadLiveStatus();
+            } catch(e) {
+                console.error(e);
+            }
+        }
+
+        function renderUser() {
+            document.getElementById('userEmail').textContent = userData.email;
+            document.getElementById('userRole').textContent = userData.role;
+            if (userData.role === 'admin') {
+                document.getElementById('adminSection').innerHTML =
+                    '<a href="/admin" class="admin-link">→ Admin Panel</a>';
+            }
+        }
+
+        function renderSubscription(sub) {
+            const banner = document.getElementById('subBanner');
+            const badge = document.getElementById('subBadge');
+
+            if (!sub || !sub.active) {
+                banner.innerHTML = `
+                    <div class="sub-banner expired">
+                        <div class="sub-info">
+                            <div class="sub-icon">⚠️</div>
+                            <div class="sub-text">
+                                <h3>Subscription Expired</h3>
+                                <p>Contact admin to renew your subscription</p>
+                            </div>
+                        </div>
+                    </div>`;
+                badge.className = 'badge badge-expired';
+                badge.textContent = 'Expired';
+            } else {
+                const isTrial = sub.plan === 'trial';
+                banner.innerHTML = `
+                    <div class="sub-banner">
+                        <div class="sub-info">
+                            <div class="sub-icon">${isTrial ? '⏰' : '✅'}</div>
+                            <div class="sub-text">
+                                <h3>${sub.plan} Plan — Active</h3>
+                                <p>${sub.days_left} days remaining</p>
+                            </div>
+                        </div>
+                    </div>`;
+                badge.className = isTrial ? 'badge badge-trial' : 'badge badge-active';
+                badge.textContent = `${sub.days_left}d left`;
+            }
+        }
+
+        function renderSettings() {
+            if (!botConfig) return;
+            selectedExchange = botConfig.exchange || 'binance';
+            selectedEnv = botConfig.testnet !== false;
+            selectedAmountMode = botConfig.amount_mode || 'fixed';
+
+            // Exchange buttons
+            document.getElementById('exBinance').classList.toggle('active', selectedExchange === 'binance');
+            document.getElementById('exWeex').classList.toggle('active', selectedExchange === 'weex');
+            // Env buttons
+            document.getElementById('envDemo').classList.toggle('active', selectedEnv);
+            document.getElementById('envLive').classList.toggle('active', !selectedEnv);
+            // Passphrase
+            document.getElementById('passphraseGroup').style.display = selectedExchange === 'weex' ? 'block' : 'none';
+            // Max leverage
+            const maxLev = selectedExchange === 'weex' ? 500 : 125;
+            document.getElementById('maxLev').textContent = maxLev;
+            document.getElementById('leverage').max = maxLev;
+
+            // API key status
+            document.getElementById('apiKeyStatus').innerHTML = botConfig.has_api_key ?
+                '<span style="color:#0ecb81;">(saved)</span>' : '';
+            document.getElementById('passphraseStatus').innerHTML = botConfig.has_passphrase ?
+                '<span style="color:#0ecb81;">(saved)</span>' : '';
+
+            // Form values
+            document.getElementById('symbolsList').value = (botConfig.symbols_list || []).join(', ');
+            document.getElementById('timeframe').value = botConfig.timeframe || '5m';
+            document.getElementById('leverage').value = botConfig.leverage || 10;
+            document.getElementById('mode').value = botConfig.mode || 'both';
+            document.getElementById('amount').value = botConfig.amount || 100;
+            document.getElementById('amountPct').value = botConfig.amount_pct || 10;
+            document.getElementById('stopLossPct').value = botConfig.stop_loss_pct || 2;
+
+            // Amount mode
+            document.getElementById('amtFixed').classList.toggle('active', selectedAmountMode === 'fixed');
+            document.getElementById('amtPct').classList.toggle('active', selectedAmountMode === 'percent');
+            document.getElementById('amountGroup').style.display = selectedAmountMode === 'fixed' ? 'block' : 'none';
+            document.getElementById('amountPctGroup').style.display = selectedAmountMode === 'percent' ? 'block' : 'none';
+
+            updateTP();
+        }
+
+        function renderBotStatus(running) {
+            const statusEl = document.getElementById('statBotStatus');
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+
+            if (running) {
+                statusEl.innerHTML = '<span class="status-dot running"></span>Running';
+                statusEl.className = 'stat-value green';
+                startBtn.style.display = 'none';
+                stopBtn.style.display = 'block';
+            } else {
+                statusEl.innerHTML = '<span class="status-dot stopped"></span>Stopped';
+                statusEl.className = 'stat-value yellow';
+                startBtn.style.display = 'block';
+                stopBtn.style.display = 'none';
+            }
+
+            // Update stats
+            if (botConfig) {
+                document.getElementById('statExchange').textContent = (botConfig.exchange || 'binance').toUpperCase();
+                document.getElementById('statEnv').textContent = selectedEnv ? 'Demo/Testnet' : 'Mainnet';
+                document.getElementById('statCoins').textContent = (botConfig.symbols_list || []).length;
+                document.getElementById('statCoinsList').textContent = (botConfig.symbols_list || []).slice(0, 3).join(', ');
+            }
+        }
+
+        function setExchange(ex) { selectedExchange = ex; renderSettings(); }
+        function setEnv(env) { selectedEnv = env; renderSettings(); }
+        function setAmountMode(mode) { selectedAmountMode = mode; renderSettings(); }
+
+        function updateTP() {
+            const sl = parseFloat(document.getElementById('stopLossPct').value) || 0;
+            document.getElementById('takeProfitPct').value = (sl * 3).toFixed(1);
+        }
+        document.getElementById('stopLossPct').addEventListener('input', updateTP);
+
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tab).classList.add('active');
+        }
+
+        async function saveConfig() {
+            const symbols = document.getElementById('symbolsList').value
+                .split(',').map(s => s.trim().toUpperCase()).filter(s => s);
+            const body = {
+                exchange: selectedExchange,
+                testnet: selectedEnv,
+                symbols_list: symbols,
+                timeframe: document.getElementById('timeframe').value,
+                leverage: parseInt(document.getElementById('leverage').value),
+                amount_mode: selectedAmountMode,
+                amount: parseFloat(document.getElementById('amount').value),
+                amount_pct: parseFloat(document.getElementById('amountPct').value),
+                stop_loss_pct: parseFloat(document.getElementById('stopLossPct').value),
+                mode: document.getElementById('mode').value,
+            };
+            // Only include API keys if user entered them
+            const apiKey = document.getElementById('apiKey').value.trim();
+            const apiSecret = document.getElementById('apiSecret').value.trim();
+            const passphrase = document.getElementById('apiPassphrase').value.trim();
+            if (apiKey) body.api_key = apiKey;
+            if (apiSecret) body.api_secret = apiSecret;
+            if (passphrase !== '' && selectedExchange === 'weex') body.api_passphrase = passphrase;
+
+            try {
+                const r = await fetch('/api/bot/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(body)
+                });
+                const data = await r.json();
+                if (data.success) {
+                    alert('✅ Settings saved!');
+                    loadMe();
+                    // Clear password fields
+                    document.getElementById('apiKey').value = '';
+                    document.getElementById('apiSecret').value = '';
+                    document.getElementById('apiPassphrase').value = '';
+                } else {
+                    alert('❌ ' + (data.error || 'Save failed'));
+                }
+            } catch(e) {
+                alert('Network error');
+            }
+        }
+
+        async function startBot() {
+            try {
+                const r = await fetch('/api/bot/start', {method: 'POST'});
+                const data = await r.json();
+                if (data.success) {
+                    alert('✅ Bot started!');
+                    renderBotStatus(true);
+                    loadLiveStatus();
+                } else {
+                    alert('❌ ' + (data.error || 'Failed to start'));
+                }
+            } catch(e) { alert('Network error'); }
+        }
+
+        async function stopBot() {
+            if (!confirm('Stop the bot?')) return;
+            try {
+                const r = await fetch('/api/bot/stop', {method: 'POST'});
+                const data = await r.json();
+                if (data.success) {
+                    alert('⏹ Bot stopped');
+                    renderBotStatus(false);
+                }
+            } catch(e) { alert('Network error'); }
+        }
+
+        async function loadLiveStatus() {
+            try {
+                const r = await fetch('/api/bot/status');
+                const data = await r.json();
+                if (data.success && data.running) {
+                    document.getElementById('liveStatus').textContent = JSON.stringify(data, null, 2);
+                    if (data.balance && data.balance.success) {
+                        document.getElementById('statBalance').textContent = '$' + Number(data.balance.balance).toFixed(2);
+                        document.getElementById('statBalanceSub').textContent = 'Connected';
+                    }
+                    if (data.started_at) {
+                        document.getElementById('statBotStarted').textContent = 'Started: ' + new Date(data.started_at).toLocaleString();
+                    }
+                } else {
+                    document.getElementById('liveStatus').textContent = 'Bot not running.';
+                    renderBotStatus(false);
+                }
+            } catch(e) {}
+        }
+
+        async function logout() {
+            await fetch('/api/auth/logout', {method: 'POST'});
+            window.location.href = '/';
+        }
+
+        // Auto-refresh live status every 5 seconds if bot running
+        setInterval(() => {
+            if (document.getElementById('startBtn').style.display === 'none') {
+                loadLiveStatus();
+            }
+        }, 5000);
+
+        // Initial load
+        loadMe();
+    </script>
+</body>
+</html>
