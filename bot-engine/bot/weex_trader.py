@@ -550,12 +550,16 @@ class WEEXFuturesTrader:
         leverage = max(1, min(500, int(leverage)))
         # Convert to the format WEEX expects for this mode (BTCSUSDT for demo)
         order_sym = self._order_symbol(symbol)
+        plain_sym = symbol.upper()  # Plain symbol (BTCUSDT) — some endpoints accept this even in demo
         # WEEX expects: {symbol, marginType, crossLeverage}
         # Try multiple body shapes — WEEX has changed this format over time
         bodies_to_try = [
             {"symbol": order_sym, "marginType": "CROSSED", "crossLeverage": leverage},
             {"symbol": order_sym, "leverage": leverage, "marginType": "CROSSED"},
             {"symbol": order_sym, "crossLeverage": leverage},
+            # Also try with plain symbol — leverage endpoint may use BTCUSDT even in demo
+            {"symbol": plain_sym, "marginType": "CROSSED", "crossLeverage": leverage},
+            {"symbol": plain_sym, "leverage": leverage},
         ]
         path = "/capi/v3/account/leverage"
         last_error = None

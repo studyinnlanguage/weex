@@ -4,12 +4,12 @@
   "api_passphrase": "Student1085296",
   "exchange": "weex",
   "testnet": true,
-  "symbol": "1INCHUSDT",
+  "symbol": "BEATSUSDT",
   "symbols_list": [
-    "1INCHUSDT"
+    "BEATSUSDT"
   ],
   "timeframe": "5m",
-  "leverage": 10,
+  "leverage": 20,
   "amount_mode": "percent",
   "amount": 100.0,
   "amount_pct": 10.0,

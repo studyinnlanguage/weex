@@ -1005,7 +1005,7 @@ class BotEngine:
                         })
                 else:
                     err = str(r.get("error", ""))
-                    if "-2015" in err or "Invalid API-key" in err or "401" in err:
+                    if "-2015" in err or "Invalid API-key" in err or "-1044" in err or "401" in err:
                         self._emit("log", {
                             "level": "error",
                             "msg": f"[{sym}] ❌ API AUTH FAILED: {err[:80]}. Bot stopped."
@@ -1019,9 +1019,10 @@ class BotEngine:
                             "msg": f"[{sym}] ⚠️ Symbol band/closed hai - skip."
                         })
                     else:
+                        # Don't block bot over leverage errors — trades will use default
                         self._emit("log", {
                             "level": "warn",
-                            "msg": f"[{sym}] Leverage set nahi ho saka: {err[:80]}"
+                            "msg": f"[{sym}] ⚠️ Leverage set nahi ho saka: {err[:80]}. Bot default leverage use karega."
                         })
 
         _bg_thread = _threading.Thread(target=_set_leverage_bg, daemon=True)
