@@ -1,24 +1,25 @@
 # TradeBot Cloud SaaS - Dependencies
 # Install with: pip install -r requirements.txt
+# NOTE: Version ranges are used to avoid conflicts
 
 # Web framework
-Flask==3.0.3
-Flask-SocketIO==5.3.6
-python-engineio==4.9.1
-python-socketio==5.11.4
-simple-websocket==1.0.0
+Flask>=3.0.3,<4.0
+Flask-SocketIO>=5.3.6,<6.0
+python-engineio>=4.9.1,<5.0
+python-socketio>=5.11.4,<6.0
+simple-websocket>=1.0.0,<2.0
 
-# HTTP requests
-requests==2.32.3
+# HTTP requests (no strict version — let pip resolve)
+requests>=2.25.1
 
 # Binance API clients
-binance-futures-connector==1.5.0
-python-binance==1.0.19
+binance-futures-connector>=1.5.0
+python-binance>=1.0.19
 
 # Data / math
-pandas==2.2.2
-numpy==1.26.4
+pandas>=2.0.0
+numpy>=1.24.0
 pyarrow>=15.0.0
 
 # Utilities
-python-dotenv==1.0.1
+python-dotenv>=1.0.1
