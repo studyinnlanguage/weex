@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  tradebot-saas:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tradebot-saas
+    restart: always
+    ports:
+      - "5005:5000"
+    environment:
+      - PORT=5000
+      - HOST=0.0.0.0
+      - FLASK_SECRET=your_flask_secret_here  # Change this in production
+      - ADMIN_SECRET=AdminBot@2024!          # Change this in production
+      - ENCRYPTION_KEY=tradebot-cloud-encryption-key-CHANGE-ME-32-chars # Change this in production
+      - DB_PATH=/app/db_volume/database.json
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - tradebot-db:/app/db_volume
+      - tradebot-logs:/app/logs
+      - tradebot-bot-logs:/app/bot-engine/logs
+
+volumes:
+  tradebot-db:
+  tradebot-logs:
+  tradebot-bot-logs:

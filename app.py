@@ -41,6 +41,7 @@ import time
 import uuid
 import shutil
 import signal
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -56,7 +57,8 @@ import requests as req_lib
 
 BASE_DIR = Path(__file__).resolve().parent
 BOT_ENGINE_DIR = BASE_DIR / "bot-engine"
-DB_FILE = BASE_DIR / "database.json"
+DB_FILE = Path(os.environ.get("DB_PATH", str(BASE_DIR / "database.json")))
+DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 LOG_DIR = BASE_DIR / "logs"
 USER_CONFIGS_DIR = BASE_DIR / "user_configs"
 LOG_DIR.mkdir(exist_ok=True)
@@ -143,21 +145,25 @@ def verify_password(password: str, stored: str) -> bool:
 # Database (JSON file)
 # ============================================================
 
+db_lock = threading.Lock()
+
 def load_db() -> dict:
-    if DB_FILE.exists():
-        try:
-            with open(DB_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"DB load failed: {e}")
-    return {"users": {}, "licenses": {}, "bot_processes": {}}
+    with db_lock:
+        if DB_FILE.exists():
+            try:
+                with open(DB_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"DB load failed: {e}")
+        return {"users": {}, "licenses": {}, "bot_processes": {}}
 
 def save_db(db: dict):
-    try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(db, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"DB save failed: {e}")
+    with db_lock:
+        try:
+            with open(DB_FILE, "w", encoding="utf-8") as f:
+                json.dump(db, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"DB save failed: {e}")
 
 DB = load_db()
 
@@ -400,6 +406,12 @@ def start_user_bot(user_id: str) -> dict:
 
 def stop_user_bot(user_id: str) -> dict:
     """Stop a user's bot-engine instance."""
+    # Set trading_active = False in user's config
+    user = DB.get("users", {}).get(user_id)
+    if user and "bot_config" in user:
+        user["bot_config"]["trading_active"] = False
+        save_db(DB)
+
     proc_info = DB.get("bot_processes", {}).get(user_id)
     if not proc_info or not proc_info.get("pid"):
         return {"success": True, "message": "Bot not running"}
@@ -1003,6 +1015,30 @@ def bot_engine_proxy(path=''):
     content = resp.content
     content_type = resp.headers.get('content-type', '')
 
+    # Intercept start/stop trading status
+    if path == "api/start" and resp.status_code == 200:
+        try:
+            res_json = json.loads(content.decode("utf-8"))
+            if res_json.get("success"):
+                usr = DB.get("users", {}).get(user["id"])
+                if usr and "bot_config" in usr:
+                    usr["bot_config"]["trading_active"] = True
+                    save_db(DB)
+                    logger.info(f"Set trading_active = True for user {user['id']}")
+        except Exception as e:
+            logger.error(f"Error parsing start response for user {user['id']}: {e}")
+    elif path in ("api/stop", "api/force_stop") and resp.status_code == 200:
+        try:
+            res_json = json.loads(content.decode("utf-8"))
+            if res_json.get("success"):
+                usr = DB.get("users", {}).get(user["id"])
+                if usr and "bot_config" in usr:
+                    usr["bot_config"]["trading_active"] = False
+                    save_db(DB)
+                    logger.info(f"Set trading_active = False for user {user['id']}")
+        except Exception as e:
+            logger.error(f"Error parsing stop response for user {user['id']}: {e}")
+
     # If HTML, rewrite URLs so they go through /bot/ prefix
     if 'text/html' in content_type:
         html = content.decode('utf-8', errors='replace')
@@ -1250,9 +1286,88 @@ def api_admin_delete():
 # Entry point
 # ============================================================
 
+def check_expired_and_banned_bots_loop():
+    """Background loop to check for expired or banned users and stop their bots."""
+    logger.info("Background licensing watchdog thread started.")
+    while True:
+        try:
+            time.sleep(60)
+            global DB
+            DB = load_db()
+            
+            to_stop = []
+            for user_id, proc_info in list(DB.get("bot_processes", {}).items()):
+                user = DB.get("users", {}).get(user_id)
+                if not user:
+                    continue
+                if user.get("banned", False):
+                    logger.warning(f"Banned user bot detected active: {user_id}")
+                    to_stop.append(user_id)
+                    continue
+                sub = check_subscription(user)
+                if not sub["active"]:
+                    logger.warning(f"Expired subscription bot detected active: {user_id}")
+                    to_stop.append(user_id)
+            
+            for user_id in to_stop:
+                stop_user_bot(user_id)
+        except Exception as e:
+            logger.error(f"Error in background licensing loop: {e}")
+
+def auto_restart_active_bots():
+    """Auto-restarts all bots that were actively trading before restart/redeploy."""
+    logger.info("Auto-restart checker started.")
+    global DB
+    DB = load_db()
+    
+    DB["bot_processes"] = {}
+    save_db(DB)
+    logger.info("Cleared old transient bot processes from DB.")
+    
+    active_users = []
+    for user_id, user in DB.get("users", {}).items():
+        bot_config = user.get("bot_config", {})
+        if bot_config.get("trading_active") is True:
+            sub = check_subscription(user)
+            if sub["active"] and not user.get("banned", False):
+                active_users.append(user_id)
+                
+    logger.info(f"Found {len(active_users)} active bots to restart: {active_users}")
+    
+    for user_id in active_users:
+        try:
+            logger.info(f"Auto-restarting bot for user {user_id}...")
+            result = start_user_bot(user_id)
+            if result.get("success"):
+                port = result["port"]
+                url = f"http://127.0.0.1:{port}/api/start"
+                req = urllib.request.Request(url, method="POST")
+                req.add_header("Content-Type", "application/json")
+                time.sleep(1.5)
+                try:
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        res_data = json.loads(response.read().decode("utf-8"))
+                        if res_data.get("success"):
+                            logger.info(f"Successfully auto-started trading for user {user_id} on port {port}.")
+                        else:
+                            logger.error(f"Trading auto-start failed for user {user_id} on port {port}: {res_data.get('error')}")
+                except Exception as e:
+                    logger.error(f"Failed to send start request to bot for user {user_id} on port {port}: {e}")
+            else:
+                logger.error(f"Process auto-start failed for user {user_id}: {result.get('error')}")
+        except Exception as e:
+            logger.error(f"Failed to auto-restart bot for user {user_id}: {e}")
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     host = os.environ.get("HOST", "0.0.0.0")
+    
+    # Start auto-restart of active bots
+    threading.Thread(target=auto_restart_active_bots, daemon=True).start()
+    
+    # Start background license/banned enforcement thread
+    threading.Thread(target=check_expired_and_banned_bots_loop, daemon=True).start()
+    
     logger.info(f"SaaS webapp running on port {port}")
     from werkzeug.serving import run_simple
-    run_simple(host, port, app, use_reloader=False, use_debugger=False)
+    run_simple(host, port, app, use_reloader=False, use_debugger=False, threaded=True)
