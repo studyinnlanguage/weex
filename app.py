@@ -61,8 +61,10 @@ DB_FILE = Path(os.environ.get("DB_PATH", str(BASE_DIR / "database.json")))
 DB_FILE.parent.mkdir(parents=True, exist_ok=True)
 LOG_DIR = BASE_DIR / "logs"
 USER_CONFIGS_DIR = BASE_DIR / "user_configs"
+USER_INSTANCES_DIR = BASE_DIR / "user_instances"  # Each user's own bot-engine copy
 LOG_DIR.mkdir(exist_ok=True)
 USER_CONFIGS_DIR.mkdir(exist_ok=True)
+USER_INSTANCES_DIR.mkdir(exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -76,8 +78,8 @@ logger = logging.getLogger("saas")
 
 app = Flask(__name__, template_folder=str(BASE_DIR / "templates"),
             static_folder=str(BASE_DIR / "static"))
-app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET", "tradebot-saas-secret-change-me-32chars")
-app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+app.config["SECRET_KEY"] = os.environ.get("FLASK_SECRET", secrets.token_hex(32))
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=2)  # Shorter session = more secure
 
 # ============================================================
 # Configuration
@@ -157,11 +159,18 @@ def load_db() -> dict:
                 logger.error(f"DB load failed: {e}")
         return {"users": {}, "licenses": {}, "bot_processes": {}}
 
+# Thread lock for DB operations (prevents corruption with concurrent requests)
+import threading as _threading
+_db_lock = _threading.Lock()
+
 def save_db(db: dict):
     with db_lock:
         try:
-            with open(DB_FILE, "w", encoding="utf-8") as f:
+            # Write to temp file first, then rename (atomic write — prevents corruption)
+            tmp_file = str(DB_FILE) + ".tmp"
+            with open(tmp_file, "w", encoding="utf-8") as f:
                 json.dump(db, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_file, str(DB_FILE))
         except Exception as e:
             logger.error(f"DB save failed: {e}")
 
@@ -188,7 +197,12 @@ def current_user() -> Optional[dict]:
     return DB["users"].get(user_id)
 
 def check_subscription(user: dict) -> dict:
-    """Check user's subscription status."""
+    """Check user's subscription status.
+    Admin users ALWAYS have active lifetime subscription — never expire."""
+    # ADMIN = always active, no license needed
+    if user.get("role") == "admin":
+        return {"active": True, "status": "active", "days_left": 9999, "plan": "lifetime"}
+
     sub = user.get("subscription", {})
     if not sub:
         return {"active": False, "status": "none", "days_left": 0, "plan": "none"}
@@ -196,6 +210,10 @@ def check_subscription(user: dict) -> dict:
     expires_at = sub.get("expires_at")
     if not expires_at:
         return {"active": False, "status": "none", "days_left": 0, "plan": "none"}
+
+    # Lifetime licenses never expire
+    if expires_at.startswith("9999"):
+        return {"active": True, "status": "active", "days_left": 9999, "plan": sub.get("plan", "lifetime")}
 
     try:
         expiry = datetime.fromisoformat(expires_at.replace("Z", ""))
@@ -270,10 +288,34 @@ def write_user_bot_config(user_id: str) -> str:
         "whatsapp_apikey": decrypt(config.get("whatsapp_apikey_enc", "")),
     }
 
-    # Write to bot-engine's config.json (this is THE config file bot-engine reads)
-    config_path = BOT_ENGINE_DIR / "config.json"
+    # Write to user's OWN bot-engine directory (NOT shared!)
+    # Each user gets their own copy of bot-engine at user_instances/{user_id}/
+    user_bot_dir = USER_INSTANCES_DIR / user_id
+    user_bot_dir.mkdir(parents=True, exist_ok=True)
+
+    # Copy bot-engine files if not already copied (only first time)
+    if not (user_bot_dir / "app.py").exists():
+        import shutil
+        # Copy everything from bot-engine EXCEPT logs, config, __pycache__
+        for item in BOT_ENGINE_DIR.iterdir():
+            if item.name in ('logs', '__pycache__', 'config.json', 'config.json.bak',
+                           '.local_activation.dat', '.admin_password.txt',
+                           'licenses.json', 'crash.log', 'user_configs'):
+                continue
+            dest = user_bot_dir / item.name
+            if item.is_dir():
+                if not dest.exists():
+                    shutil.copytree(item, dest, ignore=shutil.ignore_patterns('__pycache__'))
+            else:
+                shutil.copy2(item, dest)
+
+    # Write THIS USER's config to THEIR OWN config.json
+    config_path = user_bot_dir / "config.json"
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(bot_config, f, indent=2, ensure_ascii=False)
+
+    # Create logs dir for this user's bot
+    (user_bot_dir / "logs").mkdir(exist_ok=True)
 
     return str(config_path)
 
@@ -302,12 +344,12 @@ def ensure_bot_engine_running(user_id: str) -> dict:
     except Exception as e:
         return {"success": False, "error": f"Config write failed: {e}"}
 
-    # Spawn bot-engine process (just the Flask web server)
-    # Use sys.executable so it works on Windows (python) AND Linux (python3)
+    # Spawn bot-engine process from USER'S OWN directory
+    user_bot_dir = USER_INSTANCES_DIR / user_id
     try:
         proc = subprocess.Popen(
             [sys.executable, "app.py"],
-            cwd=str(BOT_ENGINE_DIR),
+            cwd=str(user_bot_dir),  # Run from user's own directory!
             env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
             stdout=open(LOG_DIR / f"bot_{user_id}.log", "w"),
             stderr=subprocess.STDOUT,
@@ -320,17 +362,16 @@ def ensure_bot_engine_running(user_id: str) -> dict:
         }
         save_db(DB)
 
-        logger.info(f"Started bot-engine for user {user_id}: PID={proc.pid}, port={port}")
+        logger.info(f"Started bot-engine for user {user_id}: PID={proc.pid}, port={port}, dir={user_bot_dir}")
         time.sleep(2)  # Wait for Flask to start
         
         # Check if process is still alive after 2 seconds
         if not is_process_alive(proc.pid):
-            # Process crashed immediately — read the log to find out why
             log_file = LOG_DIR / f"bot_{user_id}.log"
             error_detail = ""
             try:
                 with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                    error_detail = f.read()[-500:]  # Last 500 chars
+                    error_detail = f.read()[-500:]
             except:
                 pass
             logger.error(f"Bot-engine crashed immediately for {user_id}. Log: {error_detail}")
@@ -379,12 +420,12 @@ def start_user_bot(user_id: str) -> dict:
     except Exception as e:
         return {"success": False, "error": f"Config write failed: {e}"}
 
-    # Spawn bot-engine process
-    # Use sys.executable so it works on Windows (python) AND Linux (python3)
+    # Spawn bot-engine process from USER'S OWN directory
+    user_bot_dir = USER_INSTANCES_DIR / user_id
     try:
         proc = subprocess.Popen(
             [sys.executable, "app.py"],
-            cwd=str(BOT_ENGINE_DIR),
+            cwd=str(user_bot_dir),  # Run from user's own directory!
             env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
             stdout=open(LOG_DIR / f"bot_{user_id}.log", "w"),
             stderr=subprocess.STDOUT,
@@ -397,7 +438,7 @@ def start_user_bot(user_id: str) -> dict:
         }
         save_db(DB)
 
-        logger.info(f"Started bot-engine for user {user_id}: PID={proc.pid}, port={port}")
+        logger.info(f"Started bot-engine for user {user_id}: PID={proc.pid}, port={port}, dir={user_bot_dir}")
         time.sleep(2)
         return {"success": True, "port": port, "pid": proc.pid}
     except Exception as e:
@@ -509,20 +550,30 @@ def proxy_to_bot(user_id: str, method: str, path: str, body=None) -> dict:
 
 @app.route("/")
 def index():
-    """Main page — login if not authenticated, else redirect to bot-engine dashboard."""
-    # Handle logout redirect (prevents redirect loop)
+    """Main page — fast redirect, no blocking operations."""
+    # Handle logout
     if request.args.get('logout') == '1':
         session.clear()
         return render_template("saas_login.html")
+
     if not is_logged_in():
         return render_template("saas_login.html")
-    # Check if user actually exists in DB
+
     user = current_user()
     if not user:
         session.clear()
         return render_template("saas_login.html")
-    # User is logged in — redirect directly to bot-engine dashboard
-    # This shows the FULL bot-engine dashboard (chart, settings, indicators, etc.)
+
+    # ADMIN = always go to dashboard (no license check needed)
+    if user.get("role") == "admin":
+        return redirect("/bot/")
+
+    # Regular user — check license
+    sub = check_subscription(user)
+    if not sub["active"]:
+        return render_template("saas_license.html", user=user, sub=sub)
+
+    # License active — go to dashboard
     return redirect("/bot/")
 
 @app.route("/admin")
@@ -565,11 +616,21 @@ def api_signup():
         if u.get("email") == email:
             return jsonify({"success": False, "error": "Yeh email pehle se registered hai"})
 
-    # First user becomes admin
-    role = "admin" if len(DB["users"]) == 0 else "user"
+    # REGULAR USER — NO admin from signup!
+    # Admin is created ONLY when someone logs in via /admin with ADMIN_SECRET password.
+    # All signup users are "user" role and MUST activate a license.
+    role = "user"
 
     user_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat() + "Z"
+
+    # Regular users start with NO subscription (must enter license key)
+    subscription = {
+        "plan": "none",
+        "status": "inactive",
+        "started_at": now,
+        "expires_at": now,
+    }
 
     user = {
         "id": user_id,
@@ -579,12 +640,7 @@ def api_signup():
         "role": role,
         "banned": False,
         "created_at": now,
-        "subscription": {
-            "plan": "none",
-            "status": "inactive",  # user must enter license key
-            "started_at": now,
-            "expires_at": now,
-        },
+        "subscription": subscription,
         "license_key": None,
         "bot_config": {
             "exchange": "binance",
@@ -640,10 +696,21 @@ def api_login():
     if user.get("banned"):
         return jsonify({"success": False, "error": "Account suspended. Admin se contact karein."})
 
+    # If admin user, ensure subscription is always active
+    if user.get("role") == "admin":
+        sub = user.get("subscription", {})
+        if sub.get("status") != "active":
+            user["subscription"] = {
+                "plan": "lifetime", "status": "active",
+                "started_at": datetime.utcnow().isoformat() + "Z",
+                "expires_at": "9999-12-31T23:59:59Z",
+            }
+            save_db(DB)
+
     session["user_id"] = user["id"]
     session.permanent = True
 
-    logger.info(f"User login: {email}")
+    logger.info(f"User login: {email} (role={user.get('role')})")
 
     return jsonify({
         "success": True,
@@ -700,7 +767,11 @@ def api_me():
 
 @app.route("/api/license/activate", methods=["POST"])
 def api_license_activate():
-    """User activates a license key."""
+    """User activates a license key.
+    Works for both:
+    - New users activating first license
+    - Existing users replacing expired license with new one
+    """
     if not is_logged_in():
         return jsonify({"success": False, "error": "Not logged in"}), 401
 
@@ -717,11 +788,12 @@ def api_license_activate():
     # Check license in DB
     lic = DB.get("licenses", {}).get(key)
     if not lic:
-        return jsonify({"success": False, "error": "License key invalid hai"})
+        return jsonify({"success": False, "error": "License key invalid hai. Sahi key check karein."})
 
     if lic.get("revoked"):
         return jsonify({"success": False, "error": "Yeh license revoke kar diya gaya hai. Admin se contact karein."})
 
+    # If license is already used by ANOTHER user, reject
     if lic.get("used_by") and lic["used_by"] != user["id"]:
         return jsonify({"success": False, "error": "Yeh license dusre user pe activate hai. Ek license sirf ek user pe chalta hai."})
 
@@ -729,9 +801,17 @@ def api_license_activate():
     try:
         expiry = datetime.fromisoformat(lic["expires_at"].replace("Z", ""))
         if datetime.utcnow() > expiry:
-            return jsonify({"success": False, "error": "License expire ho gaya. Admin se new license lein."})
+            return jsonify({"success": False, "error": "Yeh license expire ho gaya hai. Admin se new license lein."})
     except:
         return jsonify({"success": False, "error": "License expiry check fail"})
+
+    # If user had an old license, mark it as used (but don't revoke — admin can see history)
+    old_key = user.get("license_key")
+    if old_key and old_key != key:
+        old_lic = DB.get("licenses", {}).get(old_key)
+        if old_lic:
+            old_lic["active"] = False
+            logger.info(f"User {user['email']} replaced old license {old_key} with new {key}")
 
     # Activate license for this user
     lic["used_by"] = user["id"]
@@ -849,9 +929,11 @@ def api_bot_start():
     if not user:
         return jsonify({"success": False, "error": "User not found"}), 404
 
+    # LICENSE CHECK — no active license = no bot start
     sub = check_subscription(user)
     if not sub["active"]:
-        return jsonify({"success": False, "error": "Subscription inactive/expired. License activate karein."}), 403
+        return jsonify({"success": False,
+                        "error": "License inactive/expired. Admin se license lein."}), 403
 
     result = start_user_bot(user["id"])
     return jsonify(result)
@@ -943,7 +1025,8 @@ def api_bot_embed():
 @app.route('/bot/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
 def bot_engine_proxy(path=''):
     """Proxy ALL requests to user's bot-engine instance.
-    Auto-starts bot-engine if not running."""
+    Auto-starts bot-engine in BACKGROUND (non-blocking) if not running.
+    License check: user must have active subscription."""
     if not is_logged_in():
         return redirect("/")
 
@@ -952,35 +1035,39 @@ def bot_engine_proxy(path=''):
         session.clear()
         return redirect("/")
 
-    # Auto-start bot-engine if not running
-    status = get_bot_status(user["id"])
-    if not status["running"]:
-        result = ensure_bot_engine_running(user["id"])
-        if not result["success"]:
-            error_msg = result.get('error', 'Unknown error')
-            logger.error(f"Bot-engine start failed for {user['id']}: {error_msg}")
-            return f'''<html><body style="background:#0b0e11;color:#eaecef;font-family:sans-serif;text-align:center;padding:80px 20px;">
-            <h2 style="color:#f6465d;">⚠ Bot Engine Start Failed</h2>
-            <p style="color:#848e9c;">Error: {error_msg}</p>
-            <p style="color:#848e9c;">Please check:</p>
-            <ul style="color:#848e9c;text-align:left;max-width:400px;margin:20px auto;">
-                <li>Python installed hai?</li>
-                <li>Bot-engine ke dependencies installed hain? (pip install -r requirements.txt)</li>
-                <li>Logs check karo: logs/bot_{user["id"]}.log</li>
-            </ul>
-            <button onclick="location.reload()" style="margin-top:20px;padding:10px 20px;background:#f0b90b;color:#0b0e11;border:none;border-radius:8px;cursor:pointer;font-weight:700;">Retry</button>
-            </body></html>''', 500
-        # Wait a bit more for Flask to fully start
-        time.sleep(1)
-        status = get_bot_status(user["id"])
-        if not status["running"]:
-            return '''<html><body style="background:#0b0e11;color:#eaecef;font-family:sans-serif;text-align:center;padding:80px 20px;">
-            <h2 style="color:#f6465d;">⚠ Bot Engine Failed to Start</h2>
-            <p style="color:#848e9c;">Process start hua par turant crash ho gaya.</p>
-            <p style="color:#848e9c;">Logs check karo: logs/ folder mein bot_*.log file</p>
-            <button onclick="location.reload()" style="margin-top:20px;padding:10px 20px;background:#f0b90b;color:#0b0e11;border:none;border-radius:8px;cursor:pointer;font-weight:700;">Retry</button>
-            </body></html>''', 500
+    # LICENSE CHECK — no active license = no bot access
+    sub = check_subscription(user)
+    if not sub["active"]:
+        return redirect("/")
 
+    # Check if bot-engine is running
+    status = get_bot_status(user["id"])
+
+    if not status["running"]:
+        # Start bot-engine in BACKGROUND thread (non-blocking!)
+        # This prevents the HTTP request from hanging while bot starts
+        import threading
+        def _start_bg():
+            result = ensure_bot_engine_running(user["id"])
+            if not result["success"]:
+                logger.error(f"Background bot-engine start failed for {user['id']}: {result.get('error')}")
+
+        bg = threading.Thread(target=_start_bg, daemon=True)
+        bg.start()
+
+        # Show loading page immediately (user doesn't wait)
+        return '''<html><head><meta http-equiv="refresh" content="3"></head>
+        <body style="background:#0b0e11;color:#eaecef;font-family:sans-serif;text-align:center;padding:120px 20px;">
+        <div style="max-width:400px;margin:0 auto;">
+            <div style="width:60px;height:60px;border:4px solid #2a2e36;border-top:4px solid #f0b90b;border-radius:50%;margin:0 auto 24px;animation:spin 1s linear infinite;"></div>
+            <h2 style="color:#f0b90b;margin-bottom:8px;">Bot Engine Starting...</h2>
+            <p style="color:#848e9c;font-size:14px;">Please wait 3-5 seconds. Page will auto-refresh.</p>
+            <p style="color:#5e6673;font-size:12px;margin-top:16px;">First load takes a few seconds. Next loads will be instant.</p>
+        </div>
+        <style>@keyframes spin{0%{transform:rotate(0)}100%{transform:rotate(360deg)}}</style>
+        </body></html>'''
+
+    # Bot-engine is running — proxy the request
     port = status["port"]
     method = request.method
 
@@ -1082,7 +1169,8 @@ def bot_engine_proxy(path=''):
 
 @app.route("/api/admin/login", methods=["POST"])
 def api_admin_login():
-    """Admin login (separate from user)."""
+    """Admin login (separate from user).
+    Creates admin user with lifetime subscription if not exists."""
     data = request.get_json(force=True)
     password = data.get("password", "")
 
@@ -1113,6 +1201,16 @@ def api_admin_login():
             "bot_config": {},
         }
         DB["users"][admin_id] = admin_user
+        save_db(DB)
+        logger.info("Admin user created via admin login")
+
+    # Ensure admin ALWAYS has active lifetime subscription (DB corruption protection)
+    if admin_user.get("subscription", {}).get("status") != "active":
+        admin_user["subscription"] = {
+            "plan": "lifetime", "status": "active",
+            "started_at": datetime.utcnow().isoformat() + "Z",
+            "expires_at": "9999-12-31T23:59:59Z",
+        }
         save_db(DB)
 
     session["user_id"] = admin_user["id"]
@@ -1370,4 +1468,6 @@ if __name__ == "__main__":
     
     logger.info(f"SaaS webapp running on port {port}")
     from werkzeug.serving import run_simple
+    # threaded=True is CRITICAL — without it, server hangs when multiple requests come in
+    # (e.g., user loads dashboard while bot-engine is starting in background)
     run_simple(host, port, app, use_reloader=False, use_debugger=False, threaded=True)

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradeBot SaaS - Activate License</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+               background: linear-gradient(135deg, #0b0e11 0%, #1a1d24 100%);
+               min-height: 100vh; display: flex; align-items: center; justify-content: center; color: #eaecef; padding: 20px; }
+        .card { background: #1e2126; border: 1px solid #2a2e36; border-radius: 16px;
+                padding: 40px; width: 100%; max-width: 480px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+        .logo { width: 64px; height: 64px; background: #f0b90b; color: #0b0e11;
+                border-radius: 16px; display: flex; align-items: center; justify-content: center;
+                font-weight: 800; font-size: 28px; margin: 0 auto 16px; }
+        h1 { text-align: center; font-size: 20px; margin-bottom: 6px; }
+        p { text-align: center; color: #848e9c; font-size: 13px; margin-bottom: 24px; }
+        .info { background: rgba(246,70,93,0.1); border: 1px solid rgba(246,70,93,0.3);
+                color: #f6465d; padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 20px; }
+        label { display: block; font-size: 12px; color: #848e9c; margin-bottom: 6px; text-transform: uppercase; }
+        input { width: 100%; padding: 14px; background: #0b0e11; border: 1px solid #2a2e36;
+                color: #eaecef; border-radius: 10px; font-size: 16px; text-align: center;
+                font-family: monospace; letter-spacing: 1px; margin-bottom: 16px; }
+        input:focus { outline: none; border-color: #f0b90b; }
+        .btn { width: 100%; padding: 14px; background: linear-gradient(135deg, #f0b90b, #f8d12f);
+               color: #0b0e11; border: none; border-radius: 10px; font-size: 14px; font-weight: 700; cursor: pointer; }
+        .btn:hover { transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .logout { display: block; text-align: center; margin-top: 16px; color: #848e9c;
+                  font-size: 12px; text-decoration: none; }
+        .logout:hover { color: #f6465d; }
+        #result { margin-top: 16px; font-size: 13px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="logo">T</div>
+        <h1>License Activate Karein</h1>
+        <p>Apna license key enter karein (admin se mila hoga)</p>
+
+        <div class="info">
+            ⚠️ {{ user.email }} — Aapka license {{ sub.status }} hai.<br>
+            {% if sub.status == 'expired' %}License expire ho gaya. Admin se renew karein.{% endif %}
+            {% if sub.status == 'none' %}Koi license activate nahi hai. Admin se license key lein.{% endif %}
+        </div>
+
+        <label>License Key</label>
+        <input type="text" id="licenseKey" placeholder="TRDBOT-XXXX-XXXX-XXXX-XXXX"
+               style="text-transform: uppercase;" autocomplete="off">
+
+        <button class="btn" id="activateBtn" onclick="activateLicense()">Activate License</button>
+
+        <div id="result"></div>
+
+        <a href="/?logout=1" class="logout">Logout</a>
+    </div>
+
+    <script>
+        async function activateLicense() {
+            const key = document.getElementById('licenseKey').value.trim().toUpperCase();
+            const btn = document.getElementById('activateBtn');
+            const result = document.getElementById('result');
+
+            if (!key) {
+                result.innerHTML = '<span style="color:#f6465d;">License key daalein</span>';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Activating...';
+            result.innerHTML = '<span style="color:#f0b90b;">Please wait...</span>';
+
+            // Add 30-second timeout — Railway can be slow
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+            try {
+                const r = await fetch('/api/license/activate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({key: key}),
+                    signal: controller.signal
+                });
+                clearTimeout(timeoutId);
+
+                if (!r.ok) {
+                    throw new Error('Server error: HTTP ' + r.status);
+                }
+
+                const data = await r.json();
+                if (data.success) {
+                    result.innerHTML = '<span style="color:#0ecb81;">✅ ' + data.message + '<br>Redirecting...</span>';
+                    btn.textContent = 'Success! Redirecting...';
+                    setTimeout(() => { window.location.href = '/'; }, 1500);
+                } else {
+                    result.innerHTML = '<span style="color:#f6465d;">❌ ' + (data.error || 'Activation failed') + '</span>';
+                    btn.disabled = false;
+                    btn.textContent = 'Activate License';
+                }
+            } catch(e) {
+                clearTimeout(timeoutId);
+                let errMsg = e.message;
+                if (e.name === 'AbortError') {
+                    errMsg = 'Server timeout (30s). Railway pe slow ho sakta hai. Please try again.';
+                }
+                result.innerHTML = '<span style="color:#f6465d;">❌ ' + errMsg + '</span>';
+                btn.disabled = false;
+                btn.textContent = 'Activate License';
+            }
+        }
+
+        // Enter key to submit
+        document.getElementById('licenseKey').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                activateLicense();
+            }
+        });
+
+        // Auto-focus on input
+        document.getElementById('licenseKey').focus();
+    </script>
+</body>
+</html>

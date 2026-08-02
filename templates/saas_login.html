@@ -124,18 +124,28 @@
             e.preventDefault();
             const btn = document.getElementById('loginBtn');
             btn.disabled = true; btn.textContent = 'Logging in...';
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
             try {
                 const r = await fetch('/api/auth/login', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({
                         email: document.getElementById('loginEmail').value,
                         password: document.getElementById('loginPassword').value,
-                    })
+                    }),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
                 const data = await r.json();
-                if (data.success) window.location.href = '/';
-                else showError(data.error || 'Login failed');
-            } catch(err) { showError('Network error'); }
+                if (data.success) {
+                    window.location.href = '/';
+                } else {
+                    showError(data.error || 'Login failed');
+                }
+            } catch(err) {
+                clearTimeout(timeoutId);
+                showError(err.name === 'AbortError' ? 'Server timeout. Try again.' : 'Network error');
+            }
             btn.disabled = false; btn.textContent = 'Login';
             return false;
         }
@@ -143,6 +153,8 @@
             e.preventDefault();
             const btn = document.getElementById('signupBtn');
             btn.disabled = true; btn.textContent = 'Creating account...';
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
             try {
                 const r = await fetch('/api/auth/signup', {
                     method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -150,12 +162,17 @@
                         name: document.getElementById('signupName').value,
                         email: document.getElementById('signupEmail').value,
                         password: document.getElementById('signupPassword').value,
-                    })
+                    }),
+                    signal: controller.signal
                 });
+                clearTimeout(timeoutId);
                 const data = await r.json();
                 if (data.success) window.location.href = '/';
                 else showError(data.error || 'Signup failed');
-            } catch(err) { showError('Network error'); }
+            } catch(err) {
+                clearTimeout(timeoutId);
+                showError(err.name === 'AbortError' ? 'Server timeout. Try again.' : 'Network error');
+            }
             btn.disabled = false; btn.textContent = 'Create Account';
             return false;
         }
