@@ -1,4 +1,3 @@
-
 #!/bin/bash
 # ============================================
 # TradeBot Cloud SaaS - One-Click Server Installer

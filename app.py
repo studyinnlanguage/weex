@@ -41,7 +41,6 @@ import time
 import uuid
 import shutil
 import signal
-import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -57,8 +56,7 @@ import requests as req_lib
 
 BASE_DIR = Path(__file__).resolve().parent
 BOT_ENGINE_DIR = BASE_DIR / "bot-engine"
-DB_FILE = Path(os.environ.get("DB_PATH", str(BASE_DIR / "database.json")))
-DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+DB_FILE = BASE_DIR / "database.json"
 LOG_DIR = BASE_DIR / "logs"
 USER_CONFIGS_DIR = BASE_DIR / "user_configs"
 USER_INSTANCES_DIR = BASE_DIR / "user_instances"  # Each user's own bot-engine copy
@@ -147,24 +145,21 @@ def verify_password(password: str, stored: str) -> bool:
 # Database (JSON file)
 # ============================================================
 
-db_lock = threading.Lock()
-
 def load_db() -> dict:
-    with db_lock:
-        if DB_FILE.exists():
-            try:
-                with open(DB_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
-            except Exception as e:
-                logger.error(f"DB load failed: {e}")
-        return {"users": {}, "licenses": {}, "bot_processes": {}}
+    if DB_FILE.exists():
+        try:
+            with open(DB_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"DB load failed: {e}")
+    return {"users": {}, "licenses": {}, "bot_processes": {}}
 
 # Thread lock for DB operations (prevents corruption with concurrent requests)
 import threading as _threading
 _db_lock = _threading.Lock()
 
 def save_db(db: dict):
-    with db_lock:
+    with _db_lock:
         try:
             # Write to temp file first, then rename (atomic write — prevents corruption)
             tmp_file = str(DB_FILE) + ".tmp"
@@ -344,28 +339,34 @@ def ensure_bot_engine_running(user_id: str) -> dict:
     except Exception as e:
         return {"success": False, "error": f"Config write failed: {e}"}
 
-    # Spawn bot-engine process from USER'S OWN directory
+    # Spawn bot-engine process — DETACHED so it survives browser close
     user_bot_dir = USER_INSTANCES_DIR / user_id
     try:
-        proc = subprocess.Popen(
-            [sys.executable, "app.py"],
-            cwd=str(user_bot_dir),  # Run from user's own directory!
-            env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
-            stdout=open(LOG_DIR / f"bot_{user_id}.log", "w"),
-            stderr=subprocess.STDOUT,
-        )
+        # Detach process: survives even if browser/parent dies
+        popen_kwargs = {
+            "cwd": str(user_bot_dir),
+            "env": {**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
+            "stdout": open(LOG_DIR / f"bot_{user_id}.log", "w"),
+            "stderr": subprocess.STDOUT,
+        }
+        if sys.platform == 'win32':
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008
+        else:
+            popen_kwargs["start_new_session"] = True
+
+        proc = subprocess.Popen([sys.executable, "app.py"], **popen_kwargs)
 
         DB.setdefault("bot_processes", {})[user_id] = {
             "pid": proc.pid,
             "port": port,
             "started_at": datetime.utcnow().isoformat() + "Z",
+            "should_run": True,  # Flag: bot should keep running even if browser closes
         }
         save_db(DB)
 
-        logger.info(f"Started bot-engine for user {user_id}: PID={proc.pid}, port={port}, dir={user_bot_dir}")
-        time.sleep(2)  # Wait for Flask to start
+        logger.info(f"Started bot-engine (detached) for user {user_id}: PID={proc.pid}, port={port}")
+        time.sleep(2)
         
-        # Check if process is still alive after 2 seconds
         if not is_process_alive(proc.pid):
             log_file = LOG_DIR / f"bot_{user_id}.log"
             error_detail = ""
@@ -420,25 +421,30 @@ def start_user_bot(user_id: str) -> dict:
     except Exception as e:
         return {"success": False, "error": f"Config write failed: {e}"}
 
-    # Spawn bot-engine process from USER'S OWN directory
+    # Spawn bot-engine process — DETACHED so it survives browser close
     user_bot_dir = USER_INSTANCES_DIR / user_id
     try:
-        proc = subprocess.Popen(
-            [sys.executable, "app.py"],
-            cwd=str(user_bot_dir),  # Run from user's own directory!
-            env={**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
-            stdout=open(LOG_DIR / f"bot_{user_id}.log", "w"),
-            stderr=subprocess.STDOUT,
-        )
+        popen_kwargs = {
+            "cwd": str(user_bot_dir),
+            "env": {**os.environ, "PORT": str(port), "HOST": "127.0.0.1"},
+            "stdout": open(LOG_DIR / f"bot_{user_id}.log", "w"),
+            "stderr": subprocess.STDOUT,
+        }
+        if sys.platform == 'win32':
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | 0x00000008
+        else:
+            popen_kwargs["start_new_session"] = True
+
+        proc = subprocess.Popen([sys.executable, "app.py"], **popen_kwargs)
 
         DB.setdefault("bot_processes", {})[user_id] = {
             "pid": proc.pid,
             "port": port,
             "started_at": datetime.utcnow().isoformat() + "Z",
+            "should_run": True,
         }
         save_db(DB)
-
-        logger.info(f"Started bot-engine for user {user_id}: PID={proc.pid}, port={port}, dir={user_bot_dir}")
+        logger.info(f"Started bot-engine (detached) for user {user_id}: PID={proc.pid}, port={port}")
         time.sleep(2)
         return {"success": True, "port": port, "pid": proc.pid}
     except Exception as e:
@@ -447,19 +453,15 @@ def start_user_bot(user_id: str) -> dict:
 
 def stop_user_bot(user_id: str) -> dict:
     """Stop a user's bot-engine instance."""
-    # Set trading_active = False in user's config
-    user = DB.get("users", {}).get(user_id)
-    if user and "bot_config" in user:
-        user["bot_config"]["trading_active"] = False
-        save_db(DB)
-
     proc_info = DB.get("bot_processes", {}).get(user_id)
     if not proc_info or not proc_info.get("pid"):
         return {"success": True, "message": "Bot not running"}
 
     pid = proc_info["pid"]
-    kill_process(pid)  # Cross-platform kill
+    kill_process(pid)
 
+    # Mark as should_run=False (so watchdog doesn't restart it)
+    proc_info["should_run"] = False
     DB.get("bot_processes", {}).pop(user_id, None)
     save_db(DB)
     logger.info(f"Stopped bot-engine for user {user_id}")
@@ -1102,30 +1104,6 @@ def bot_engine_proxy(path=''):
     content = resp.content
     content_type = resp.headers.get('content-type', '')
 
-    # Intercept start/stop trading status
-    if path == "api/start" and resp.status_code == 200:
-        try:
-            res_json = json.loads(content.decode("utf-8"))
-            if res_json.get("success"):
-                usr = DB.get("users", {}).get(user["id"])
-                if usr and "bot_config" in usr:
-                    usr["bot_config"]["trading_active"] = True
-                    save_db(DB)
-                    logger.info(f"Set trading_active = True for user {user['id']}")
-        except Exception as e:
-            logger.error(f"Error parsing start response for user {user['id']}: {e}")
-    elif path in ("api/stop", "api/force_stop") and resp.status_code == 200:
-        try:
-            res_json = json.loads(content.decode("utf-8"))
-            if res_json.get("success"):
-                usr = DB.get("users", {}).get(user["id"])
-                if usr and "bot_config" in usr:
-                    usr["bot_config"]["trading_active"] = False
-                    save_db(DB)
-                    logger.info(f"Set trading_active = False for user {user['id']}")
-        except Exception as e:
-            logger.error(f"Error parsing stop response for user {user['id']}: {e}")
-
     # If HTML, rewrite URLs so they go through /bot/ prefix
     if 'text/html' in content_type:
         html = content.decode('utf-8', errors='replace')
@@ -1384,89 +1362,52 @@ def api_admin_delete():
 # Entry point
 # ============================================================
 
-def check_expired_and_banned_bots_loop():
-    """Background loop to check for expired or banned users and stop their bots."""
-    logger.info("Background licensing watchdog thread started.")
-    while True:
-        try:
-            time.sleep(60)
-            global DB
-            DB = load_db()
-            
-            to_stop = []
-            for user_id, proc_info in list(DB.get("bot_processes", {}).items()):
-                user = DB.get("users", {}).get(user_id)
-                if not user:
-                    continue
-                if user.get("banned", False):
-                    logger.warning(f"Banned user bot detected active: {user_id}")
-                    to_stop.append(user_id)
-                    continue
-                sub = check_subscription(user)
-                if not sub["active"]:
-                    logger.warning(f"Expired subscription bot detected active: {user_id}")
-                    to_stop.append(user_id)
-            
-            for user_id in to_stop:
-                stop_user_bot(user_id)
-        except Exception as e:
-            logger.error(f"Error in background licensing loop: {e}")
-
-def auto_restart_active_bots():
-    """Auto-restarts all bots that were actively trading before restart/redeploy."""
-    logger.info("Auto-restart checker started.")
-    global DB
-    DB = load_db()
-    
-    DB["bot_processes"] = {}
-    save_db(DB)
-    logger.info("Cleared old transient bot processes from DB.")
-    
-    active_users = []
-    for user_id, user in DB.get("users", {}).items():
-        bot_config = user.get("bot_config", {})
-        if bot_config.get("trading_active") is True:
-            sub = check_subscription(user)
-            if sub["active"] and not user.get("banned", False):
-                active_users.append(user_id)
-                
-    logger.info(f"Found {len(active_users)} active bots to restart: {active_users}")
-    
-    for user_id in active_users:
-        try:
-            logger.info(f"Auto-restarting bot for user {user_id}...")
-            result = start_user_bot(user_id)
-            if result.get("success"):
-                port = result["port"]
-                url = f"http://127.0.0.1:{port}/api/start"
-                req = urllib.request.Request(url, method="POST")
-                req.add_header("Content-Type", "application/json")
-                time.sleep(1.5)
-                try:
-                    with urllib.request.urlopen(req, timeout=10) as response:
-                        res_data = json.loads(response.read().decode("utf-8"))
-                        if res_data.get("success"):
-                            logger.info(f"Successfully auto-started trading for user {user_id} on port {port}.")
-                        else:
-                            logger.error(f"Trading auto-start failed for user {user_id} on port {port}: {res_data.get('error')}")
-                except Exception as e:
-                    logger.error(f"Failed to send start request to bot for user {user_id} on port {port}: {e}")
-            else:
-                logger.error(f"Process auto-start failed for user {user_id}: {result.get('error')}")
-        except Exception as e:
-            logger.error(f"Failed to auto-restart bot for user {user_id}: {e}")
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     host = os.environ.get("HOST", "0.0.0.0")
-    
-    # Start auto-restart of active bots
-    threading.Thread(target=auto_restart_active_bots, daemon=True).start()
-    
-    # Start background license/banned enforcement thread
-    threading.Thread(target=check_expired_and_banned_bots_loop, daemon=True).start()
-    
     logger.info(f"SaaS webapp running on port {port}")
+
+    # Start watchdog thread — keeps bot-engine alive 24/7 even when browser is closed
+    def _watchdog():
+        """Background watchdog: restarts dead bot-engine processes.
+        Runs every 30 seconds. If a bot-engine that should be running has died,
+        it restarts it automatically."""
+        logger.info("Watchdog thread started — monitoring bot-engine processes")
+        while True:
+            try:
+                for user_id, proc_info in list(DB.get("bot_processes", {}).items()):
+                    # Only restart if should_run=True (user explicitly started bot)
+                    if not proc_info.get("should_run", False):
+                        continue
+
+                    pid = proc_info.get("pid")
+                    if not pid:
+                        continue
+
+                    # Check if process is alive
+                    if not is_process_alive(pid):
+                        logger.warning(f"Watchdog: bot-engine died for user {user_id}, restarting...")
+                        # Remove old entry
+                        old_port = proc_info.get("port")
+                        DB.get("bot_processes", {}).pop(user_id, None)
+                        save_db(DB)
+
+                        # Restart bot-engine
+                        result = ensure_bot_engine_running(user_id)
+                        if result["success"]:
+                            logger.info(f"Watchdog: restarted bot-engine for user {user_id} on port {result['port']}")
+                        else:
+                            logger.error(f"Watchdog: failed to restart for {user_id}: {result.get('error')}")
+                            # Don't keep trying if it keeps failing
+                            break
+            except Exception as e:
+                logger.error(f"Watchdog error: {e}")
+
+            time.sleep(30)  # Check every 30 seconds
+
+    watchdog_thread = _threading.Thread(target=_watchdog, daemon=True)
+    watchdog_thread.start()
+
     from werkzeug.serving import run_simple
     # threaded=True is CRITICAL — without it, server hangs when multiple requests come in
     # (e.g., user loads dashboard while bot-engine is starting in background)
